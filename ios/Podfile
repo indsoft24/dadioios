@@ -61,6 +61,10 @@ target 'Dadio' do
         if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 12.0
           config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
         end
+        
+        # Suppress documentation and nullability warnings from third-party pods
+        existing_warning_flags = config.build_settings['WARNING_CFLAGS'] || '$(inherited)'
+        config.build_settings['WARNING_CFLAGS'] = "#{existing_warning_flags} -Wno-documentation -Wno-documentation-deprecated-sync -Wno-nullability-completeness"
       end
     end
   end
