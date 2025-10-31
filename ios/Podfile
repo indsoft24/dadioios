@@ -55,6 +55,23 @@ target 'Dadio' do
       :mac_catalyst_enabled => false
     )
     
+    # Fix FlipperKit compilation errors with Xcode 16.4+
+    # Add missing #include <functional> to FlipperTransportTypes.h
+    flipper_transport_types_path = File.join(installer.sandbox.root, 'Headers/Private/Flipper/FlipperTransportTypes.h')
+    if File.exist?(flipper_transport_types_path)
+      content = File.read(flipper_transport_types_path)
+      unless content.include?('#include <functional>')
+        # Insert #include <functional> after the last #include statement
+        lines = content.lines
+        last_include_index = lines.rindex { |line| line.strip.start_with?('#include') }
+        if last_include_index
+          lines.insert(last_include_index + 1, "#include <functional>\n")
+          File.write(flipper_transport_types_path, lines.join)
+          puts "  Fixed FlipperTransportTypes.h: Added missing #include <functional>"
+        end
+      end
+    end
+    
     # Also fix project-level settings for RNEnxRtc architecture issues
     installer.pods_project.build_configurations.each do |config|
       # Clear any project-level EXCLUDED_ARCHS that might affect RNEnxRtc
