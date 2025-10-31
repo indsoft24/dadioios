@@ -72,6 +72,22 @@ target 'Dadio' do
       end
     end
     
+    # Fix RNImageCropPicker compatibility with TOCropViewController
+    # The customAspectRatio property doesn't exist in newer versions of TOCropViewController
+    image_crop_picker_path = File.join(__dir__, '..', 'node_modules', 'react-native-image-crop-picker', 'ios', 'src', 'ImageCropPicker.m')
+    if File.exist?(image_crop_picker_path)
+      content = File.read(image_crop_picker_path)
+      if content.include?('cropVC.customAspectRatio = aspectRatio;')
+        # Comment out the problematic line - aspect ratio can be set via other TOCropViewController APIs
+        content = content.gsub(
+          /(\s*)cropVC\.customAspectRatio\s*=\s*aspectRatio;/,
+          '\1// Fixed: customAspectRatio property not available in this TOCropViewController version\n\1// cropVC.customAspectRatio = aspectRatio;'
+        )
+        File.write(image_crop_picker_path, content)
+        puts "  Fixed RNImageCropPicker: Commented out unsupported customAspectRatio property"
+      end
+    end
+    
     # Also fix project-level settings for RNEnxRtc architecture issues
     installer.pods_project.build_configurations.each do |config|
       # Clear any project-level EXCLUDED_ARCHS that might affect RNEnxRtc
