@@ -221,49 +221,100 @@ jobs:
             echo ""
             echo "=== Searching for actual errors ==="
             
+            # Count failures
+            failure_count=$(grep -i "error:\|failed\|failure" build.log | wc -l | tr -d ' ')
+            echo "Found approximately $failure_count error/failure occurrences"
+            echo ""
+            
+            # Look for the actual build summary
+            if grep -q "BUILD\|failures\|succeeded" build.log -i; then
+              echo "=== Build Summary ==="
+              grep -i "BUILD.*\|failures\|succeeded" build.log | tail -10
+              echo ""
+            fi
+            
             # Look for common error patterns
             if grep -q "error:" build.log; then
-              echo "=== Compilation Errors ==="
+              echo "=== Compilation Errors (last 50) ==="
               grep -i "error:" build.log | tail -50
+              echo ""
             fi
             
             if grep -q "failed\|failure" build.log -i; then
-              echo ""
-              echo "=== Build Failures ==="
+              echo "=== Build Failures (last 30) ==="
               grep -i "failed\|failure" build.log | tail -30
+              echo ""
             fi
             
             if grep -q "undefined\|undefined symbol\|ld:.*undefined" build.log -i; then
-              echo ""
-              echo "=== Linking Errors ==="
+              echo "=== Linking Errors (last 30) ==="
               grep -i "undefined\|undefined symbol\|ld:" build.log | tail -30
+              echo ""
             fi
             
             if grep -q "architecture\|EXCLUDED_ARCHS\|ARCHS.*valid" build.log -i; then
-              echo ""
-              echo "=== Architecture Errors ==="
+              echo "=== Architecture Errors (last 20) ==="
               grep -i "architecture\|EXCLUDED_ARCHS\|ARCHS.*valid" build.log | tail -20
+              echo ""
+            fi
+            
+            # Show what targets failed
+            if grep -q "in target" build.log; then
+              echo "=== Failed Targets ==="
+              grep "in target" build.log | grep -i "error\|fail" | tail -20
+              echo ""
             fi
             
             # Show context around errors
-            echo ""
-            echo "=== Error Context (last 300 lines) ==="
-            tail -300 build.log
+            echo "=== Final Build Output (last 200 lines) ==="
+            tail -200 build.log
             
-            # Save build log as artifact
+            echo ""
+            echo "📋 Full build log saved to: ios/build.log"
+            echo "Download the build-log artifact to see complete error details"
+            
             exit $build_status
           else
             echo "✅ Build completed successfully!"
+            # Verify build actually succeeded
+            if grep -q "BUILD SUCCEEDED" build.log; then
+              echo "✅ Verified: BUILD SUCCEEDED in log"
+            fi
           fi
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_number }}
           path: ios/build.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Extract and show build failures
+        if: failure()
+        working-directory: ./ios
+        run: |
+          if [ -f "build.log" ]; then
+            echo "=== Analyzing Build Failures ==="
+            echo ""
+            
+            # Find the actual failure messages
+            echo "1. Searching for error: lines..."
+            grep -n "error:" build.log | tail -20 || echo "No 'error:' found"
+            echo ""
+            
+            echo "2. Searching for failure patterns..."
+            grep -B 5 -A 5 "failed\|failure" build.log | tail -40 || echo "No failures found"
+            echo ""
+            
+            echo "3. Searching for specific targets that failed..."
+            grep -B 10 "in target.*from project" build.log | grep -E "(error:|failed|failure)" | tail -30 || echo "No target-specific failures found"
+            echo ""
+            
+            echo "4. Last 50 lines of build log:"
+            tail -50 build.log
+          fi
 
       - name: Archive iOS (Release)
         if: github.event_name == 'workflow_dispatch'
@@ -303,16 +354,55 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Check build result
+        id: build_result
+        if: always()
+        working-directory: ./ios
+        run: |
+          if [ -f "build.log" ]; then
+            # Check if build actually succeeded
+            if grep -q "(2 failures)\|error:\|failed" build.log; then
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "❌ Build has failures"
+            elif grep -q "BUILD SUCCEEDED\|** BUILD SUCCEEDED **" build.log; then
+              echo "status=success" >> $GITHUB_OUTPUT
+              echo "✅ Build succeeded"
+            else
+              echo "status=unknown" >> $GITHUB_OUTPUT
+              echo "⚠️ Could not determine build status"
+            fi
+          else
+            echo "status=no_log" >> $GITHUB_OUTPUT
+            echo "⚠️ Build log not found"
+          fi
+
       - name: Build summary
         if: always()
         run: |
-          if [ "${{ job.status }}" == "success" ]; then
+          BUILD_STATUS="${{ steps.build_result.outputs.status }}"
+          JOB_STATUS="${{ job.status }}"
+          
+          echo "Build Status: ${BUILD_STATUS}"
+          echo "Job Status: ${JOB_STATUS}"
+          echo ""
+          
+          if [ "${BUILD_STATUS}" == "success" ] || [ "${JOB_STATUS}" == "success" ]; then
             echo "✅ iOS build completed successfully!"
-            echo "📱 Download artifacts from the Actions tab"
-            echo "📦 Build artifacts will be available for 7 days"
+          echo "📱 Download artifacts from the Actions tab"
+          echo "📦 Build artifacts will be available for 7 days"
           else
             echo "❌ iOS build failed"
-            echo "Check the logs above for details"
+            echo ""
+            echo "To debug:"
+            echo "1. Check the 'Build iOS App' step for error details"
+            echo "2. Download the build-log artifact (if available)"
+            echo "3. Look for compilation or linking errors above"
+            echo ""
+            echo "Common issues:"
+            echo "- Missing dependencies"
+            echo "- Architecture mismatches"
+            echo "- Code signing errors"
+            echo "- Linking errors"
           fi
           echo ""
           echo "Project: Dadio iOS"
