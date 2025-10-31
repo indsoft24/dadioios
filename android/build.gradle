@@ -1,0 +1,38 @@
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 26
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "25.1.8937393"
+        kotlinVersion = "1.9.24"
+        facebookSdkVersion = "13.1.0"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")  
+        classpath("com.android.tools.build:gradle:8.1.1")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("com.google.gms:google-services:4.4.0")
+        classpath ("com.google.firebase:firebase-crashlytics-gradle:2.9.9")
+    }
+}
+
+allprojects {
+    repositories {
+        maven {
+            url "https://artifactory.paytm.in/libs-release-local"
+        }
+        maven {
+            url "https://phonepe.mycloudrepo.io/public/repositories/phonepe-intentsdk-android"
+        }
+        google()
+        jcenter()
+        maven { url 'https://www.jitpack.io' }
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"

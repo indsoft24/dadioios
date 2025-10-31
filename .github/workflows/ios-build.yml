@@ -1,0 +1,90 @@
+name: Build iOS App
+
+on:
+  push:
+    branches: [ main, develop, dev ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  build-ios:
+    name: Build iOS App
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: |
+          npm cache clean --force
+          npm install --legacy-peer-deps
+          npm config set legacy-peer-deps true
+
+      - name: Install CocoaPods
+        run: |
+          sudo gem install cocoapods
+          pod --version
+
+      - name: Install iOS dependencies
+        working-directory: ./ios
+        run: |
+          pod install --repo-update
+
+      - name: Build iOS App (Debug - Simulator)
+        run: |
+          cd ios
+          xcodebuild -workspace Dadio.xcworkspace \
+            -scheme Dadio \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Archive iOS (Release)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cd ios
+          xcodebuild -workspace Dadio.xcworkspace \
+            -scheme Dadio \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath ./build/Dadio.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            clean archive
+        continue-on-error: true
+
+      - name: Export IPA (if archive exists)
+        if: github.event_name == 'workflow_dispatch' && success()
+        run: |
+          cd ios/build
+          if [ -d "Dadio.xcarchive" ]; then
+            echo "Archive created successfully"
+            # IPA export would require export options plist and signing
+            # For now, the archive is available for download
+          fi
+        continue-on-error: true
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-${{ github.run_number }}
+          path: |
+            ios/build/
+            ios/DerivedData/
+          retention-days: 7
+
+      - name: Build summary
+        run: |
+          echo "✅ iOS build completed!"
+          echo "📱 Download artifacts from the Actions tab"
+          echo "📦 Build artifacts will be available for 7 days"
