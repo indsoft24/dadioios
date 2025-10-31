@@ -55,6 +55,19 @@ target 'Dadio' do
       :mac_catalyst_enabled => false
     )
     
+    # Also fix project-level settings for RNEnxRtc architecture issues
+    installer.pods_project.build_configurations.each do |config|
+      # Clear any project-level EXCLUDED_ARCHS that might affect RNEnxRtc
+      config.build_settings.keys.each do |key|
+        if key.to_s.include?('EXCLUDED_ARCHS')
+          excluded = config.build_settings[key]
+          if excluded.is_a?(Array) && excluded.include?('arm64') && excluded.include?('x86_64')
+            config.build_settings[key] = nil
+          end
+        end
+      end
+    end
+    
     # Fix deployment target warnings by setting minimum iOS version to 13.4 (matching React Native 0.73.3 requirement)
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
@@ -102,17 +115,29 @@ target 'Dadio' do
           # Delete ALL EXCLUDED_ARCHS keys completely (they cause invalid architecture errors)
           keys_to_delete = []
           config.build_settings.keys.each do |key|
-            if key.to_s.include?('EXCLUDED_ARCHS')
+            key_str = key.to_s
+            if key_str.include?('EXCLUDED_ARCHS')
               keys_to_delete << key
             end
           end
-          keys_to_delete.each { |key| config.build_settings.delete(key) }
+          keys_to_delete.each do |key|
+            config.build_settings.delete(key)
+          end
           
           # Force ARCHS to use standard architectures (will auto-select arm64 or x86_64 as needed)
           config.build_settings['ARCHS'] = '$(ARCHS_STANDARD)'
           
           # Ensure VALID_ARCHS is set correctly
           config.build_settings['VALID_ARCHS'] = 'arm64 arm64e x86_64'
+          
+          # Ensure these are explicitly set to nil/empty to override any inherited values
+          # Setting to empty array should work, but nil is safer
+          ['EXCLUDED_ARCHS', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]', 'EXCLUDED_ARCHS[sdk=iphonesimulator]'].each do |key|
+            if config.build_settings[key].nil? || 
+               (config.build_settings[key].is_a?(Array) && config.build_settings[key].include?('arm64') && config.build_settings[key].include?('x86_64'))
+              config.build_settings[key] = []
+            end
+          end
           
           # Set ONLY_ACTIVE_ARCH to YES for Debug to speed up builds
           if config.name == 'Debug'
@@ -121,7 +146,7 @@ target 'Dadio' do
             config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
           end
           
-          puts "  Fixed RNEnxRtc [#{config.name}]: Deleted #{keys_to_delete.length} EXCLUDED_ARCHS keys, set ARCHS=$(ARCHS_STANDARD)"
+          puts "  Fixed RNEnxRtc [#{config.name}]: Deleted #{keys_to_delete.length} EXCLUDED_ARCHS keys, set ARCHS=$(ARCHS_STANDARD), cleared EXCLUDED_ARCHS"
         end
         
         # Suppress documentation and nullability warnings from third-party pods

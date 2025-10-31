@@ -33,26 +33,36 @@ jobs:
           sudo gem install cocoapods
           pod --version
 
-      - name: Install iOS dependencies
+      - name: Install CocoaPods dependencies
         working-directory: ./ios
         run: |
+          # Clean previous pod installations to ensure fresh setup
+          rm -rf Pods Podfile.lock
+          # Install pods (this will apply our Podfile fixes)
           pod install --repo-update
 
-      - name: Build iOS App (Debug - Simulator)
+      - name: List available simulators
         run: |
-          cd ios
+          xcrun simctl list devices available
+
+      - name: Build iOS App (Debug - Simulator)
+        working-directory: ./ios
+        run: |
+          # Clean build folder
+          rm -rf build
+          # Build for simulator
           xcodebuild -workspace Dadio.xcworkspace \
             -scheme Dadio \
             -configuration Debug \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath ./build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            clean build
 
       - name: Archive iOS (Release)
         if: github.event_name == 'workflow_dispatch'
+        working-directory: ./ios
         run: |
-          cd ios
           xcodebuild -workspace Dadio.xcworkspace \
             -scheme Dadio \
             -configuration Release \
@@ -64,27 +74,42 @@ jobs:
 
       - name: Export IPA (if archive exists)
         if: github.event_name == 'workflow_dispatch' && success()
+        working-directory: ./ios
         run: |
-          cd ios/build
-          if [ -d "Dadio.xcarchive" ]; then
-            echo "Archive created successfully"
+          if [ -d "build/Dadio.xcarchive" ]; then
+            echo "✅ Archive created successfully at build/Dadio.xcarchive"
+            echo "📦 Archive is available for download in artifacts"
             # IPA export would require export options plist and signing
             # For now, the archive is available for download
+          else
+            echo "⚠️ Archive not found"
           fi
         continue-on-error: true
 
       - name: Upload build artifacts
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-build-${{ github.run_number }}
           path: |
             ios/build/
-            ios/DerivedData/
+            ios/Pods/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Build summary
+        if: always()
         run: |
-          echo "✅ iOS build completed!"
-          echo "📱 Download artifacts from the Actions tab"
-          echo "📦 Build artifacts will be available for 7 days"
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ iOS build completed successfully!"
+            echo "📱 Download artifacts from the Actions tab"
+            echo "📦 Build artifacts will be available for 7 days"
+          else
+            echo "❌ iOS build failed"
+            echo "Check the logs above for details"
+          fi
+          echo ""
+          echo "Project: Dadio iOS"
+          echo "Workspace: ios/Dadio.xcworkspace"
+          echo "Scheme: Dadio"
+          echo "Configuration: Debug"
