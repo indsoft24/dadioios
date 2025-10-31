@@ -60,14 +60,33 @@ jobs:
             echo "⚠️ Warning: Podfile post_install fixes may not have been applied"
           fi
           
+          # Wait a moment for filesystem to sync
+          sleep 2
+          
           # Verify pod install completed successfully
-          if [ ! -f "Dadio.xcworkspace" ]; then
-            echo "❌ Error: Workspace file not created!"
-            exit 1
+          echo "Checking for workspace file..."
+          if [ -e "Dadio.xcworkspace" ]; then
+            echo "✅ Workspace file exists: Dadio.xcworkspace"
+            ls -ld Dadio.xcworkspace
+          else
+            echo "⚠️ Workspace not found immediately after pod install"
+            echo "Current directory: $(pwd)"
+            echo "Files in ios directory:"
+            ls -la | head -20
+            echo ""
+            echo "Looking for .xcworkspace files:"
+            find . -name "*.xcworkspace" 2>/dev/null | head -5 || echo "No .xcworkspace found"
+            echo ""
+            echo "Retrying after 2 seconds..."
+            sleep 2
+            if [ -e "Dadio.xcworkspace" ]; then
+              echo "✅ Workspace found on retry"
+            else
+              echo "❌ Workspace still not found - this may cause build to fail"
+            fi
           fi
           
-          echo "✅ Pod install completed successfully"
-          echo "Workspace: $(ls -la Dadio.xcworkspace)"
+          echo "✅ Pod install step completed"
 
       - name: Verify Podfile fixes applied
         working-directory: ./ios
@@ -153,6 +172,19 @@ jobs:
               sys.exit(0)  # Don't fail the build if this step fails
           EOF
 
+      - name: Verify workspace exists before build
+        working-directory: ./ios
+        run: |
+          echo "Verifying workspace before build..."
+          if [ ! -e "Dadio.xcworkspace" ]; then
+            echo "❌ Error: Workspace file not found!"
+            echo "Current directory: $(pwd)"
+            echo "Contents:"
+            ls -la
+            exit 1
+          fi
+          echo "✅ Workspace verified: Dadio.xcworkspace exists"
+
       - name: Build iOS App (Debug - Simulator)
         working-directory: ./ios
         continue-on-error: true
@@ -162,8 +194,15 @@ jobs:
           
           # Build for simulator with detailed error output
           echo "Starting xcodebuild..."
+          echo "Working directory: $(pwd)"
           echo "Workspace: $(pwd)/Dadio.xcworkspace"
           echo "Scheme: Dadio"
+          
+          # Double-check workspace exists
+          if [ ! -e "Dadio.xcworkspace" ]; then
+            echo "❌ Fatal: Workspace not found before build!"
+            exit 1
+          fi
           
           # Build and capture output
           xcodebuild -workspace Dadio.xcworkspace \
