@@ -97,20 +97,31 @@ target 'Dadio' do
           end
         end
         
-        # Special fix for RNEnxRtc - force valid architecture settings
+        # Special aggressive fix for RNEnxRtc - force valid architecture settings
         if target.name == 'RNEnxRtc'
-          # Ensure ARCHS is set correctly for all SDKs
-          config.build_settings['ARCHS'] = '$(ARCHS_STANDARD)'
-          # Remove any remaining invalid EXCLUDED_ARCHS
+          # Delete ALL EXCLUDED_ARCHS keys completely (they cause invalid architecture errors)
+          keys_to_delete = []
           config.build_settings.keys.each do |key|
-            if key.to_s.include?('EXCLUDED_ARCHS') && config.build_settings[key].is_a?(Array)
-              excluded = config.build_settings[key]
-              if excluded.include?('arm64') && excluded.include?('x86_64')
-                config.build_settings.delete(key)
-              end
+            if key.to_s.include?('EXCLUDED_ARCHS')
+              keys_to_delete << key
             end
           end
-          puts "  Fixed RNEnxRtc: Set ARCHS to $(ARCHS_STANDARD)"
+          keys_to_delete.each { |key| config.build_settings.delete(key) }
+          
+          # Force ARCHS to use standard architectures (will auto-select arm64 or x86_64 as needed)
+          config.build_settings['ARCHS'] = '$(ARCHS_STANDARD)'
+          
+          # Ensure VALID_ARCHS is set correctly
+          config.build_settings['VALID_ARCHS'] = 'arm64 arm64e x86_64'
+          
+          # Set ONLY_ACTIVE_ARCH to YES for Debug to speed up builds
+          if config.name == 'Debug'
+            config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+          else
+            config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
+          end
+          
+          puts "  Fixed RNEnxRtc [#{config.name}]: Deleted #{keys_to_delete.length} EXCLUDED_ARCHS keys, set ARCHS=$(ARCHS_STANDARD)"
         end
         
         # Suppress documentation and nullability warnings from third-party pods
