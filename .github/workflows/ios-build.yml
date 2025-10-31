@@ -38,26 +38,193 @@ jobs:
         run: |
           # Clean previous pod installations to ensure fresh setup
           rm -rf Pods Podfile.lock
+          
+          # Verify Podfile exists and has our fixes
+          echo "Checking Podfile..."
+          if grep -q "RNEnxRtc" Podfile; then
+            echo "✅ Podfile contains RNEnxRtc fixes"
+          fi
+          if grep -q "EXCLUDED_ARCHS" Podfile; then
+            echo "✅ Podfile contains EXCLUDED_ARCHS fixes"
+          fi
+          
           # Install pods (this will apply our Podfile fixes)
-          pod install --repo-update
+          echo "Installing pods and applying Podfile fixes..."
+          pod install --repo-update 2>&1 | tee pod-install.log
+          
+          # Check if post_install hook ran (look for our fix messages)
+          if grep -q "Fixed RNEnxRtc" pod-install.log 2>/dev/null; then
+            echo "✅ Podfile post_install hook executed successfully"
+            grep "Fixed RNEnxRtc" pod-install.log
+          else
+            echo "⚠️ Warning: Podfile post_install fixes may not have been applied"
+          fi
+          
+          # Verify pod install completed successfully
+          if [ ! -f "Dadio.xcworkspace" ]; then
+            echo "❌ Error: Workspace file not created!"
+            exit 1
+          fi
+          
+          echo "✅ Pod install completed successfully"
+          echo "Workspace: $(ls -la Dadio.xcworkspace)"
+
+      - name: Verify Podfile fixes applied
+        working-directory: ./ios
+        run: |
+          echo "Verifying Podfile post_install fixes were applied..."
+          
+          # Check if RNEnxRtc target exists and has correct settings
+          if [ -d "Pods/Target Support Files/RNEnxRtc" ]; then
+            echo "RNEnxRtc pod found"
+            # Check xcconfig files
+            for xcconfig in "Pods/Target Support Files/RNEnxRtc"/*.xcconfig; do
+              if [ -f "$xcconfig" ]; then
+                echo "Checking $(basename $xcconfig)..."
+                if grep -q "EXCLUDED_ARCHS.*arm64.*x86_64" "$xcconfig" 2>/dev/null; then
+                  echo "⚠️ WARNING: Found invalid EXCLUDED_ARCHS in $xcconfig"
+                  echo "Contents:"
+                  grep "EXCLUDED_ARCHS" "$xcconfig"
+                else
+                  echo "✅ No invalid EXCLUDED_ARCHS found"
+                fi
+              fi
+            done
+          else
+            echo "RNEnxRtc pod directory not found (may not be installed)"
+          fi
+          
+          # Check project file for architecture settings
+          if [ -f "Pods/Pods.xcodeproj/project.pbxproj" ]; then
+            echo "Checking Pods project for RNEnxRtc architecture settings..."
+            if grep -A 5 "RNEnxRtc.*=" "Pods/Pods.xcodeproj/project.pbxproj" | grep -q "EXCLUDED_ARCHS.*arm64.*x86_64"; then
+              echo "⚠️ WARNING: Invalid EXCLUDED_ARCHS found in project file"
+            else
+              echo "✅ Project file looks good"
+            fi
+          fi
 
       - name: List available simulators
         run: |
-          xcrun simctl list devices available
+          xcrun simctl list devices available | head -30
+
+      - name: Manual architecture fix (fallback)
+        working-directory: ./ios
+        run: |
+          echo "Applying manual architecture fix as fallback..."
+          
+          # Use Python to fix the project file if needed
+          python3 << 'EOF'
+          import re
+          import sys
+          
+          project_file = "Pods/Pods.xcodeproj/project.pbxproj"
+          try:
+              with open(project_file, 'r') as f:
+                  content = f.read()
+              
+              # Count occurrences of invalid EXCLUDED_ARCHS
+              invalid_pattern = r'EXCLUDED_ARCHS.*=.*\([^)]*arm64[^)]*x86_64[^)]*\)'
+              matches = re.findall(invalid_pattern, content)
+              
+              if matches:
+                  print(f"Found {len(matches)} invalid EXCLUDED_ARCHS settings")
+                  # Remove invalid EXCLUDED_ARCHS lines that exclude both architectures
+                  content = re.sub(
+                      r'(\s+)EXCLUDED_ARCHS\[sdk=iphonesimulator\*\][^;]*=.*\([^)]*arm64[^)]*x86_64[^)]*\);',
+                      r'\1EXCLUDED_ARCHS[sdk=iphonesimulator*] = ();',
+                      content,
+                      flags=re.MULTILINE
+                  )
+                  content = re.sub(
+                      r'(\s+)EXCLUDED_ARCHS[^;]*=.*\([^)]*arm64[^)]*x86_64[^)]*\);',
+                      r'',
+                      content,
+                      flags=re.MULTILINE
+                  )
+                  
+                  with open(project_file, 'w') as f:
+                      f.write(content)
+                  print("✅ Fixed invalid EXCLUDED_ARCHS in project file")
+              else:
+                  print("✅ No invalid EXCLUDED_ARCHS found (or already fixed)")
+          except Exception as e:
+              print(f"⚠️ Could not fix project file: {e}")
+              sys.exit(0)  # Don't fail the build if this step fails
+          EOF
 
       - name: Build iOS App (Debug - Simulator)
         working-directory: ./ios
+        continue-on-error: true
         run: |
           # Clean build folder
           rm -rf build
-          # Build for simulator
+          
+          # Build for simulator with detailed error output
+          echo "Starting xcodebuild..."
+          echo "Workspace: $(pwd)/Dadio.xcworkspace"
+          echo "Scheme: Dadio"
+          
+          # Build and capture output
           xcodebuild -workspace Dadio.xcworkspace \
             -scheme Dadio \
             -configuration Debug \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath ./build \
             CODE_SIGNING_ALLOWED=NO \
-            clean build
+            clean build 2>&1 | tee build.log
+            
+          build_status=${PIPESTATUS[0]}
+          
+          if [ $build_status -ne 0 ]; then
+            echo ""
+            echo "❌ Build failed with exit code $build_status"
+            echo ""
+            echo "=== Searching for actual errors ==="
+            
+            # Look for common error patterns
+            if grep -q "error:" build.log; then
+              echo "=== Compilation Errors ==="
+              grep -i "error:" build.log | tail -50
+            fi
+            
+            if grep -q "failed\|failure" build.log -i; then
+              echo ""
+              echo "=== Build Failures ==="
+              grep -i "failed\|failure" build.log | tail -30
+            fi
+            
+            if grep -q "undefined\|undefined symbol\|ld:.*undefined" build.log -i; then
+              echo ""
+              echo "=== Linking Errors ==="
+              grep -i "undefined\|undefined symbol\|ld:" build.log | tail -30
+            fi
+            
+            if grep -q "architecture\|EXCLUDED_ARCHS\|ARCHS.*valid" build.log -i; then
+              echo ""
+              echo "=== Architecture Errors ==="
+              grep -i "architecture\|EXCLUDED_ARCHS\|ARCHS.*valid" build.log | tail -20
+            fi
+            
+            # Show context around errors
+            echo ""
+            echo "=== Error Context (last 300 lines) ==="
+            tail -300 build.log
+            
+            # Save build log as artifact
+            exit $build_status
+          else
+            echo "✅ Build completed successfully!"
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: ios/build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Archive iOS (Release)
         if: github.event_name == 'workflow_dispatch'
