@@ -5,12 +5,17 @@
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
+    "ios:simulator": "react-native run-ios --simulator=\"iPhone 16\"",
+    "ios:device": "react-native run-ios --device",
+    "ios:build": "cd ios && xcodebuild -workspace Dadio.xcworkspace -scheme Dadio -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16' build",
+    "ios:pod-install": "cd ios && pod install --repo-update",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
     "build": "npx react-native build-android --mode=release",
     "apk": "cd android && gradlew assembleRelease",
-    "clean": "cd android && gradlew clean"
+    "clean": "cd android && gradlew clean",
+    "clean:ios": "cd ios && rm -rf Pods Podfile.lock build DerivedData && pod cache clean --all"
   },
   "dependencies": {
     "@miblanchard/react-native-slider": "^2.6.0",
