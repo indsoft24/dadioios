@@ -58,13 +58,70 @@ target 'Dadio' do
     # Fix deployment target warnings by setting minimum iOS version to 13.4 (matching React Native 0.73.3 requirement)
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
+        # Fix deployment target
         if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 13.4
           config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.4'
         end
         
+        # Fix architecture issues - critical for RNEnxRtc and similar pods
+        # Check all possible EXCLUDED_ARCHS key formats
+        excluded_keys = config.build_settings.keys.select { |k| k.to_s.include?('EXCLUDED_ARCHS') }
+        excluded_keys << 'EXCLUDED_ARCHS' unless excluded_keys.include?('EXCLUDED_ARCHS')
+        
+        excluded_keys.each do |excluded_key|
+          excluded_archs = config.build_settings[excluded_key]
+          
+          # Handle both Array and String formats
+          if excluded_archs.is_a?(Array)
+            # If both arm64 and x86_64 are excluded, clear all exclusions (invalid config)
+            if excluded_archs.include?('arm64') && excluded_archs.include?('x86_64')
+              config.build_settings.delete(excluded_key)
+              puts "  Fixed #{target.name}: Cleared invalid EXCLUDED_ARCHS (#{excluded_key})"
+            # Remove arm64 if it's excluded (needed for Apple Silicon simulators)
+            elsif excluded_archs.include?('arm64')
+              excluded_archs.delete('arm64')
+              config.build_settings[excluded_key] = excluded_archs
+              puts "  Fixed #{target.name}: Removed arm64 from EXCLUDED_ARCHS"
+            end
+          elsif excluded_archs.is_a?(String)
+            # Handle string format (space or comma separated)
+            excluded_list = excluded_archs.split(/[\s,]+/).map(&:strip).reject(&:empty?)
+            if excluded_list.include?('arm64') && excluded_list.include?('x86_64')
+              config.build_settings.delete(excluded_key)
+              puts "  Fixed #{target.name}: Cleared invalid EXCLUDED_ARCHS string (#{excluded_key})"
+            elsif excluded_list.include?('arm64')
+              excluded_list.delete('arm64')
+              config.build_settings[excluded_key] = excluded_list.join(' ')
+              puts "  Fixed #{target.name}: Removed arm64 from EXCLUDED_ARCHS string"
+            end
+          end
+        end
+        
+        # Special fix for RNEnxRtc - force valid architecture settings
+        if target.name == 'RNEnxRtc'
+          # Ensure ARCHS is set correctly for all SDKs
+          config.build_settings['ARCHS'] = '$(ARCHS_STANDARD)'
+          # Remove any remaining invalid EXCLUDED_ARCHS
+          config.build_settings.keys.each do |key|
+            if key.to_s.include?('EXCLUDED_ARCHS') && config.build_settings[key].is_a?(Array)
+              excluded = config.build_settings[key]
+              if excluded.include?('arm64') && excluded.include?('x86_64')
+                config.build_settings.delete(key)
+              end
+            end
+          end
+          puts "  Fixed RNEnxRtc: Set ARCHS to $(ARCHS_STANDARD)"
+        end
+        
         # Suppress documentation and nullability warnings from third-party pods
-        existing_warning_flags = config.build_settings['WARNING_CFLAGS'] || '$(inherited)'
-        config.build_settings['WARNING_CFLAGS'] = "#{existing_warning_flags} -Wno-documentation -Wno-documentation-deprecated-sync -Wno-nullability-completeness"
+        # Apply to both C and C++ flags
+        ['WARNING_CFLAGS', 'OTHER_CFLAGS', 'OTHER_CPLUSPLUSFLAGS'].each do |flag_key|
+          existing_flags = config.build_settings[flag_key] || '$(inherited)'
+          # Add warning suppressions if not already present
+          unless existing_flags.include?('-Wno-documentation')
+            config.build_settings[flag_key] = "#{existing_flags} -Wno-documentation -Wno-documentation-deprecated-sync -Wno-nullability-completeness -Wno-deprecated-declarations"
+          end
+        end
       end
     end
   end
